@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GazingEngageMent — Demo Lecture</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        background: #0d1117;
+        color: #e6edf3;
+      }
+      header {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #30363d;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      header h1 {
+        font-size: 1.1rem;
+        margin: 0;
+        font-weight: 600;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem;
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 1.5rem;
+      }
+      @media (max-width: 800px) {
+        main { grid-template-columns: 1fr; }
+      }
+      .lecture {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 1rem;
+      }
+      .lecture video {
+        width: 100%;
+        border-radius: 6px;
+        background: #000;
+        aspect-ratio: 16 / 9;
+      }
+      .lecture h2 { margin-top: 0.5rem; font-size: 1rem; }
+      .panel {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 1rem;
+        font-size: 0.85rem;
+      }
+      .panel h3 { margin: 0 0 0.5rem 0; font-size: 0.9rem; }
+      .row { display: flex; justify-content: space-between; padding: 2px 0; }
+      .row span:last-child { font-variant-numeric: tabular-nums; color: #7ee787; }
+
+      /* Consent dialog */
+      .modal-backdrop {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 50;
+      }
+      .modal {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 1.5rem;
+        max-width: 520px;
+        width: calc(100% - 2rem);
+      }
+      .modal h2 { margin-top: 0; }
+      .modal p { line-height: 1.55; }
+      .modal-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+      button {
+        background: #238636; color: white;
+        border: none; border-radius: 6px;
+        padding: 0.55rem 1rem;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      button.secondary { background: #30363d; }
+      button:hover { filter: brightness(1.1); }
+
+      /* Status indicator (bottom-right floating) */
+      .status {
+        position: fixed; right: 1rem; bottom: 1rem;
+        background: #161b22; border: 1px solid #30363d;
+        border-radius: 999px;
+        padding: 0.4rem 0.9rem;
+        font-size: 0.8rem;
+        display: flex; align-items: center; gap: 0.5rem;
+        z-index: 30;
+      }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: #7ee787; }
+      .dot.behavioral { background: #f0883e; }
+      .dot.off { background: #f85149; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>GazingEngageMent — Demo Lecture</h1>
+      <span id="header-mode" style="font-size: 0.8rem; color: #8b949e;">initializing…</span>
+    </header>
+    <main>
+      <section class="lecture">
+        <video id="lecture-video" controls poster=""></video>
+        <h2>Sample lecture — Introduction to Linear Algebra</h2>
+        <p style="color: #8b949e; font-size: 0.85rem; margin-bottom: 0;">
+          Play the video to start a session. Engagement is computed locally; only
+          numeric feature vectors are uploaded to the backend.
+        </p>
+      </section>
+      <aside class="panel" id="debug">
+        <h3>Engagement debug</h3>
+        <div class="row"><span>mode</span><span id="dbg-mode">—</span></div>
+        <div class="row"><span>face_present</span><span id="dbg-face">—</span></div>
+        <div class="row"><span>head_aligned</span><span id="dbg-head">—</span></div>
+        <div class="row"><span>gaze_on_screen</span><span id="dbg-gaze">—</span></div>
+        <div class="row"><span>tab_visible</span><span id="dbg-vis">—</span></div>
+        <div class="row"><span>window_focused</span><span id="dbg-foc">—</span></div>
+        <div class="row"><span>input_activity</span><span id="dbg-act">—</span></div>
+        <div class="row" style="margin-top: 0.5rem; border-top: 1px solid #30363d; padding-top: 6px;">
+          <span><strong>score</strong></span><span id="dbg-score"><strong>—</strong></span>
+        </div>
+      </aside>
+    </main>
+    <div class="status" id="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">initializing…</span>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

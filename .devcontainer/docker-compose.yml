@@ -1,0 +1,56 @@
+# Devcontainer compose file.
+#
+# Volume strategy:
+#   * The project folder is bind-mounted into /workspaces/GazingEngageMent so
+#     editor changes on the host appear immediately in the container.
+#   * `backend/.venv` and `frontend/node_modules` are *named Docker volumes*
+#     mounted on top of the bind mount. This shadows those paths inside the
+#     container — pip and npm install into the volumes, which never touch
+#     the host filesystem. Result: no .venv or node_modules ever appears in
+#     the project folder.
+#
+# To recreate dependency volumes from scratch:
+#   make container-reset
+#
+# Ports:
+#   8000 → FastAPI (uvicorn)
+#   5173 → Vite dev server
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gazing-engagement-dev
+    # `sleep infinity` keeps the container running so the VS Code devcontainer
+    # client (or `docker exec`) can attach. The actual servers are launched
+    # via `make dev`.
+    command: sleep infinity
+    init: true
+    user: vscode
+    working_dir: /workspaces/GazingEngageMent
+    volumes:
+      - ..:/workspaces/GazingEngageMent:cached
+      - backend-venv:/workspaces/GazingEngageMent/backend/.venv
+      - frontend-node-modules:/workspaces/GazingEngageMent/frontend/node_modules
+      - pip-cache:/home/vscode/.cache/pip
+      - npm-cache:/home/vscode/.npm
+      # Bind-mount the entire project so file edits round-trip live.
+      # Named-volume mounts that *shadow* the corresponding host paths inside
+      # the container. Anything written here lives in the Docker volume, not
+      # in the bind-mounted host folder.
+      #- backend-venv:/workspaces/GazingEngageMent/backend/.venv
+      #- frontend-node-modules:/workspaces/GazingEngageMent/frontend/node_modules
+    ports:
+      - "8000:8000"
+      - "5173:5173"
+    environment:
+      # Make Python find the masked venv automatically when shells start.
+      VIRTUAL_ENV: /workspaces/GazingEngageMent/backend/.venv
+      PATH: /workspaces/GazingEngageMent/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin
+
+volumes:
+  backend-venv:
+  pip-cache:
+  npm-cache:
+  frontend-node-modules:
