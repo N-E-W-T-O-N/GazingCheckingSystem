@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   const video = document.getElementById("lecture-video") as HTMLVideoElement;
   // Public Big Buck Bunny — a small free sample so the demo plays out of the box.
   video.src =
-    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+    "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v";
 }
 
 void main();
