@@ -1,3 +1,14 @@
+---
+title: GazingEngageMent
+emoji: 👀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Browser-side engagement detection for video lectures.
+---
+
 # GazingEngageMent
 
 A privacy-respecting engagement detection layer for a video lecturing system.
@@ -155,6 +166,32 @@ This creates `engagement.db` (SQLite) in the backend folder on first run.
 cd frontend
 npm install
 npm run dev
+```
+
+### Option C — Hugging Face Spaces (Docker SDK)
+
+The repo root contains a multi-stage `Dockerfile` and the README YAML frontmatter Spaces needs. Push the repo to a new Docker-SDK Space and it builds automatically:
+
+```bash
+# create a new Docker space at https://huggingface.co/new-space (SDK: Docker)
+git remote add space https://huggingface.co/spaces/<your-username>/<space-name>
+git push space main
+```
+
+What the build does:
+
+1. Stage 1 (`node:20`) runs `npm ci && npm run build`, producing `frontend/dist/`.
+2. Stage 2 (`python:3.12-slim`) installs `backend/requirements.txt`, copies the backend source and the built SPA, and starts uvicorn on port 7860.
+3. FastAPI mounts the SPA at `/` (only when `STATIC_DIR` exists), so the API at `/ingest`, `/sessions/...`, and `/live/{lecture_id}` share the origin with the frontend. CORS, mixed-content, and getUserMedia issues disappear because HF serves the Space over HTTPS.
+
+**Storage policy.** SQLite lives inside the container's writable layer. It resets whenever the Space rebuilds or restarts — that is intentional. If you ever need durability, either enable HF Persistent Storage and point `DB_PATH` at `/data/engagement.db`, or swap the SQLAlchemy URL to a hosted DB (Turso / Neon).
+
+To build and run the image locally exactly as Spaces will:
+
+```bash
+docker build -t gazing-engagement .
+docker run --rm -p 7860:7860 gazing-engagement
+# open http://localhost:7860
 ```
 
 ### Makefile cheatsheet
