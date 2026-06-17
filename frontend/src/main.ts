@@ -16,6 +16,7 @@ import { EventSender } from "./transport/EventSender";
 import { showConsentDialog } from "./ui/ConsentDialog";
 import { DebugOverlay } from "./ui/DebugOverlay";
 import { StatusIndicator } from "./ui/StatusIndicator";
+import { API_ENDPOINTS } from "./config";
 
 // Stable session id per page load; persists to sessionStorage so a reload
 // continues the same conceptual session.
@@ -40,9 +41,10 @@ async function main(): Promise<void> {
 
   const sessionId = getSessionId();
   const sender = new EventSender({
+    endpoint: API_ENDPOINTS.ingest(),
     sessionId,
     lectureId: "lec-101",
-    userId: "kumar.amit@dotsquares.com", // wire from your auth in real use
+    userId: "anonymous", // wire from your auth in real use
     mode,
   });
   sender.start();

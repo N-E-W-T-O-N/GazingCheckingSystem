@@ -23,3 +23,8 @@ Thumbs.db
 *.log
 *.pyc
 .python-version
+
+# Environment variables (local dev)
+.env
+.env.local
+.env.*.local
