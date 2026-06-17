@@ -1,7 +1,5 @@
 import { defineConfig } from "vite";
 
-// We proxy /ingest and /sessions and /live to the FastAPI backend so the SPA
-// can be served at http://localhost:5173 in dev without CORS gymnastics.
 export default defineConfig({
   server: {
     proxy: {
@@ -14,4 +12,7 @@ export default defineConfig({
     },
     allowedHosts:["little-owls-decide.loca.lt"]
   },
+  define: {
+    __API_URL__: JSON.stringify(process.env.VITE_API_URL || ""),
+  }
 });

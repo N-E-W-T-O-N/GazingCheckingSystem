@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "env": {
+    "VITE_API_URL": "@vite-api-url"
+  },
+  "rewrites": [
+    {
+      "source": "/ingest/(.*)",
+      "destination": "$VITE_API_URL/ingest/$1"
+    },
+    {
+      "source": "/sessions/(.*)",
+      "destination": "$VITE_API_URL/sessions/$1"
+    },
+    {
+      "source": "/live/(.*)",
+      "destination": "$VITE_API_URL/live/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "regions": ["sfo1"],
+  "public": true
+}
