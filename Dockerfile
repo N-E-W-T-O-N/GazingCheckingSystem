@@ -17,7 +17,7 @@
 #   2. python:3.12-slim copies the dist + installs backend deps + runs uvicorn
 
 # ─── Stage 1: build the frontend ──────────────────────────────────────────
-FROM node:20-bookworm-slim AS frontend-builder
+FROM node:24-bookworm-slim AS frontend-builder
 
 WORKDIR /build/frontend
 
@@ -35,6 +35,15 @@ FROM python:3.12-slim-bookworm
 # Hugging Face Spaces runs as UID 1000 by default. Create a matching user
 # so the container also works on hosts that enforce non-root.
 RUN useradd --create-home --uid 1000 app
+
+# System deps for baking the lecture video into the image at build time:
+#   curl  — download the source asset
+#   unzip — the default Blender asset ships as a .zip
+#   ffmpeg — fragment the MP4 to fMP4 so MSE can stream it segment-by-segment
+#   ca-certificates — required for the https download
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl unzip ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -60,4 +69,20 @@ COPY --chown=app:app --from=frontend-builder /build/frontend/dist ./frontend/dis
 EXPOSE 7860
 
 WORKDIR /home/app/backend
+
+# Bake the lecture video into the image so the container ships ready to stream
+# (no slow first-request download). This mirrors the runtime "download if
+# missing" fallback in app/video.py::ensure_video() used by native runs.
+# Lands at backend/media/lecture.mp4 — the VIDEO_PATH default. Kept as its own
+# layer so it caches across code changes. Override with:
+#   docker build --build-arg VIDEO_SOURCE_URL=... .
+ARG VIDEO_SOURCE_URL=https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_60fps_normal.mp4.zip
+RUN mkdir -p media /tmp/vid \
+    && curl -fL --retry 3 -o /tmp/vid/src.zip "$VIDEO_SOURCE_URL" \
+    && unzip -o -j /tmp/vid/src.zip '*.mp4' -d /tmp/vid \
+    && ffmpeg -y -i /tmp/vid/*.mp4 -c copy \
+         -movflags frag_keyframe+empty_moov+default_base_moof \
+         -f mp4 media/lecture.mp4 \
+    && rm -rf /tmp/vid
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]

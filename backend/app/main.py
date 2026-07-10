@@ -10,6 +10,8 @@ are registered first so they take precedence over the SPA fallback.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,11 +24,29 @@ from .config import CORS_ORIGINS
 from .db import init_db
 from .ingest import router as ingest_router
 from .reports import router as reports_router
+from .video import ensure_video
+
+log = logging.getLogger("uvicorn.error")
+
+
+async def _provision_video() -> None:
+    """Download the lecture video if it is missing (see app.video).
+
+    Runs off the event loop so a slow first-run download never blocks startup.
+    In the Docker image the file is baked in, so this returns immediately.
+    A failure here is non-fatal: only video streaming is affected; the
+    engagement pipeline and ingest keep working.
+    """
+    try:
+        await asyncio.to_thread(ensure_video)
+    except Exception:
+        log.exception("[video] provisioning failed; streaming will be unavailable")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    asyncio.create_task(_provision_video())
     yield
 
 

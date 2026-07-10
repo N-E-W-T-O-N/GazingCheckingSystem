@@ -3,3 +3,7 @@ uvicorn[standard]
 sqlalchemy
 pydantic
 python-multipart
+# Provides a bundled static ffmpeg binary so native/local runs can fragment
+# the lecture video without a system ffmpeg install. In Docker the apt-installed
+# ffmpeg is used instead (resolved first via shutil.which). See app/video.py.
+imageio-ffmpeg
