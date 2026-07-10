@@ -24,6 +24,7 @@ from .config import CORS_ORIGINS
 from .db import init_db
 from .ingest import router as ingest_router
 from .reports import router as reports_router
+from .stream import router as stream_router
 from .video import ensure_video
 
 log = logging.getLogger("uvicorn.error")
@@ -67,6 +68,7 @@ app.add_middleware(
 
 app.include_router(ingest_router)
 app.include_router(reports_router)
+app.include_router(stream_router)
 
 
 @app.get("/health")

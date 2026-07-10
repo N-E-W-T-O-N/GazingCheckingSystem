@@ -34,3 +34,13 @@ VIDEO_SOURCE_URL = os.environ.get(
     "VIDEO_SOURCE_URL",
     "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_60fps_normal.mp4.zip",
 )
+
+# Streaming (see app/stream.py):
+# Chunk size the WebSocket pump sends per credit.
+STREAM_CHUNK_BYTES = int(os.environ.get("STREAM_CHUNK_BYTES", 128 * 1024))
+# MSE codec string the client uses to build its SourceBuffer, returned by
+# /stream/{id}/info. Default matches the H.264 High + AAC Blender asset; override
+# via env if you point VIDEO_SOURCE_URL at a differently-encoded file.
+VIDEO_MIME_CODEC = os.environ.get(
+    "VIDEO_MIME_CODEC", 'video/mp4; codecs="avc1.640028, mp4a.40.2"'
+)

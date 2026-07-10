@@ -313,12 +313,13 @@ a real purpose.)
 **New**
 - `backend/app/video.py` — video provisioning (download + fragment) ✅ done
 - `backend/tests/test_video.py` — offline provisioning test ✅ done
-- `backend/app/stream.py` — gated WebSocket + `/info` (pending)
+- `backend/app/stream.py` — gated WebSocket + `/info` ✅ done
+- `backend/tests/test_stream.py` — WebSocket pump integration test ✅ done
 - `frontend/src/transport/VideoStreamClient.ts` (pending)
 
 **Edited**
-- `backend/app/config.py` — video config (`VIDEO_SOURCE_URL`, `VIDEO_CACHE_DIR`, `VIDEO_PATH`) ✅ done
-- `backend/app/main.py` — provision video on startup (background) ✅ done; register stream router (pending)
+- `backend/app/config.py` — video config + `STREAM_CHUNK_BYTES`/`VIDEO_MIME_CODEC` ✅ done
+- `backend/app/main.py` — provision video on startup (background) + register stream router ✅ done
 - `backend/requirements.txt` — `imageio-ffmpeg` for local ffmpeg ✅ done
 - `Dockerfile` — install `ffmpeg`/`curl`/`unzip`; build-time download + fragment ✅ done
 - `.gitignore` — ignore `*.mp4`/`*.m4v`/`backend/media/` ✅ done
