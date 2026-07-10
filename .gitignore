@@ -28,3 +28,9 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Large media — provide locally, never commit (see docs spec §5.4).
+# The lecture video is fragmented on the host and pointed at via VIDEO_PATH.
+*.mp4
+*.m4v
+backend/media/
