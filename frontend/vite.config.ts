@@ -9,6 +9,12 @@ export default defineConfig({
         target: "ws://localhost:8000",
         ws: true,
       },
+      // /stream has both an HTTP endpoint (/info) and the WS pump; one entry
+      // with ws:true over an http target proxies both.
+      "/stream": {
+        target: "http://localhost:8000",
+        ws: true,
+      },
     },
     allowedHosts:["little-owls-decide.loca.lt"]
   },

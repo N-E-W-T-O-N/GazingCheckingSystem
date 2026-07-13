@@ -33,7 +33,8 @@ reports the student is not attentive. Because all camera perception must stay on
 | D3 | Transport / who enforces the pause | **Server-gated via WebSocket + MSE** — server refuses to send segments while disengaged. (HTTP Range was the simpler alternative but cannot enforce a server-side gate.) |
 | D4 | Camera picker placement | **Consent dialog + live switch in the status bar.** |
 | D5 | Documentation | README.md and MATH.md are updated as part of this work. |
-| D6 | How the server gets the video | **Auto-download at runtime**, not committed to git. On first run the backend fetches `VIDEO_SOURCE_URL` (default the Blender 720p `big_buck_bunny_720p_h264.mov`), fragments it to fMP4, and caches it locally (gitignored). Solves "what if someone clones" without an LFS/large-file push. Requires `ffmpeg` in the runtime image. |
+| D6 | How the server gets the video | **Auto-download at runtime + build time**, not committed to git. Default `VIDEO_SOURCE_URL` is the Blender `bbb_sunflower_1080p_60fps_normal.mp4.zip` (1080p60 H.264). Docker bakes it in via a `RUN curl`+ffmpeg step; native runs download-if-missing on startup. Both fragment to fMP4 and cache locally (gitignored). Solves "what if someone clones" without an LFS/large-file push. Requires `ffmpeg` (apt in Docker, `imageio-ffmpeg` pip fallback locally). |
+| D7 | Paused-playback UX | **Explicit overlay, never a bare spinner.** On gate-close the client pauses the `<video>` (freezes the frame, suppressing the native buffering spinner) and shows a reason-specific `PauseOverlay`, so an intentional pause is never mistaken for network lag. Raised from testing: closing the camera lid showed a loading spinner that read as a connection problem. |
 
 ---
 
@@ -216,11 +217,29 @@ Separate enter/exit thresholds and time windows:
 Evaluated on the per-frame tick (~30 Hz) using the current-frame face/gaze and the latest
 smoothed `E`. Debounce timers convert momentary glances into no-ops.
 
-### 7.3 Status surfacing
+### 7.3 Surfacing the pause (why it's paused, not "is my wifi bad?")
 
-`StatusIndicator` gains a playback state — `▶ playing` vs `⏸ looking away` — so the pause is
-legible rather than mysterious. (This also gives `StatusIndicator.setOff()`, currently dead,
-a real purpose.)
+A server-gated stall would otherwise show the browser's native buffering spinner, which is
+indistinguishable from network lag. Two layers prevent that:
+
+1. **Freeze, don't spin.** On gate-close the client immediately calls `video.pause()`. A paused
+   `<video>` holds the last frame and shows no spinner — the spinner only appears when a
+   *playing* element underruns, so pausing first suppresses it.
+2. **Explicit overlay** (`ui/PauseOverlay.ts`, new) over the video whenever the gate is closed,
+   with a reason-specific message and how to resume:
+   - **camera off / unavailable** (track `mute`/`ended` — lid closed, privacy shutter cut the
+     device): *"Your camera turned off — the lecture is paused. Turn it back on, or switch to
+     behavioral-only mode."*
+   - **we can't see you** (no face — covers looking away *and* a covered lens): *"Paused — face
+     the screen and make sure your camera isn't covered."*
+   - **low engagement / score drop:** *"Paused — you seemed away. Ready when you are."*
+   - **tab hidden / window blurred** (behavioral-only): *"Paused — return to this tab to
+     continue."*
+
+`onGateChange` therefore carries a **reason** (`camera_off | no_face | low_score | hidden`), not
+just a boolean, so the overlay and `StatusIndicator` (`▶ playing` / `⏸ paused`) can show the
+right text. The overlay auto-clears on resume. (This also gives the currently-dead
+`StatusIndicator.setOff()` a real purpose.)
 
 ---
 
@@ -240,6 +259,10 @@ a real purpose.)
   `getUserMedia` new device → reattach to the offscreen `<video>`) without tearing down the
   pipeline or the video stream.
 - Chosen `deviceId` persisted in `localStorage` (`preferredCameraId`) and reused next session.
+- **Camera-off detection:** listen to the active video `MediaStreamTrack`'s `mute` / `ended` /
+  `unmute` events so the gate can tell *camera off* (device cut — lid/shutter) from *no face*
+  (looking away/covered) and drive the correct `PauseOverlay` reason (§7.3). A muted/ended track
+  also prompts the offer to switch to behavioral-only.
 
 ---
 
@@ -315,7 +338,9 @@ a real purpose.)
 - `backend/tests/test_video.py` — offline provisioning test ✅ done
 - `backend/app/stream.py` — gated WebSocket + `/info` ✅ done
 - `backend/tests/test_stream.py` — WebSocket pump integration test ✅ done
-- `frontend/src/transport/VideoStreamClient.ts` (pending)
+- `frontend/src/transport/VideoStreamClient.ts` — MSE + WebSocket pump client ✅ done
+- `frontend/src/engagement/PlaybackGate.ts` — gate decision (hysteresis + debounce) ✅ done
+- `frontend/src/ui/PauseOverlay.ts` — reason-specific paused overlay, §7.3/D7 ✅ done
 
 **Edited**
 - `backend/app/config.py` — video config + `STREAM_CHUNK_BYTES`/`VIDEO_MIME_CODEC` ✅ done
@@ -323,9 +348,11 @@ a real purpose.)
 - `backend/requirements.txt` — `imageio-ffmpeg` for local ffmpeg ✅ done
 - `Dockerfile` — install `ffmpeg`/`curl`/`unzip`; build-time download + fragment ✅ done
 - `.gitignore` — ignore `*.mp4`/`*.m4v`/`backend/media/` ✅ done
-- `frontend/src/engagement/EngagementMonitor.ts` — playback gate + `onGateChange` + `setCamera` + `deviceId` option
-- `frontend/src/config.ts` — `stream()` + `streamInfo()` endpoints
-- `frontend/src/ui/ConsentDialog.ts` — camera picker; return type → `{ mode, deviceId? }`
-- `frontend/src/ui/StatusIndicator.ts` — camera picker + playback state
-- `frontend/src/main.ts` — wire streaming + gate + picker; drop external URL
-- `README.md`, `MATH.md` — documentation (§10)
+- `frontend/src/engagement/types.ts` — `GateReason` type ✅ done
+- `frontend/src/engagement/EngagementMonitor.ts` — gate + `onGateChange` + `setCamera` + `deviceId` + camera-off detection ✅ done
+- `frontend/src/config.ts` — `stream()` + `streamInfo()` endpoints ✅ done
+- `frontend/vite.config.ts` — `/stream` dev proxy ✅ done
+- `frontend/src/ui/ConsentDialog.ts` — camera picker; return type → `{ mode, deviceId? }` ✅ done
+- `frontend/src/ui/StatusIndicator.ts` — camera picker + playback state ✅ done
+- `frontend/src/main.ts` — wire streaming + gate + picker; drop external URL ✅ done
+- `README.md`, `MATH.md` — documentation (§10) (pending)

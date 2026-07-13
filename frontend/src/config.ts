@@ -23,4 +23,16 @@ export const API_ENDPOINTS = {
     if (!baseUrl) return "/live";
     return baseUrl.replace(/^https?/, baseUrl.startsWith("https") ? "wss" : "ws");
   },
+  // Lecture-video streaming (see app/stream.py). `streamInfo` is plain HTTP;
+  // `stream` is the WebSocket the VideoStreamClient pumps bytes over.
+  streamInfo: (lectureId: string) => `${getApiUrl()}/stream/${lectureId}/info`,
+  stream: (lectureId: string) => {
+    const base = getApiUrl();
+    // http -> ws, https -> wss (a WebSocket URL must be absolute).
+    if (base) return `${base.replace(/^http/, "ws")}/stream/${lectureId}`;
+    // Same-origin: dev via the Vite proxy, or prod single-origin. Build from
+    // the current location since there is no configured base URL.
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/stream/${lectureId}`;
+  },
 };

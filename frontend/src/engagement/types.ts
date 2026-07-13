@@ -7,6 +7,12 @@
 
 export type Mode = "camera" | "behavioral_only";
 
+/**
+ * Why playback is gated off (null while playing). Drives the PauseOverlay
+ * message so an intentional pause never reads as network lag. See spec §7.3.
+ */
+export type GateReason = "camera_off" | "no_face" | "low_score" | "hidden";
+
 export interface FeatureVector {
   /** 1 if a face was detected this frame, 0 otherwise. */
   face_present: number;

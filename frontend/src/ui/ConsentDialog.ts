@@ -33,10 +33,27 @@ async function probeCameraPermission(): Promise<PermissionProbe> {
   }
 }
 
-export async function showConsentDialog(): Promise<Mode> {
-  const probe = await probeCameraPermission();
+export interface ConsentResult {
+  mode: Mode;
+  /** Chosen camera, when the user picked one here. Undefined = browser default. */
+  deviceId?: string;
+}
 
-  return new Promise<Mode>(resolve => {
+async function listCameras(): Promise<MediaDeviceInfo[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter(d => d.kind === "videoinput");
+  } catch {
+    return [];
+  }
+}
+
+export async function showConsentDialog(): Promise<ConsentResult> {
+  const probe = await probeCameraPermission();
+  const cameras = await listCameras();
+
+  return new Promise<ConsentResult>(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
 
@@ -74,6 +91,29 @@ export async function showConsentDialog(): Promise<Mode> {
       modal.appendChild(warn);
     }
 
+    // Camera picker. deviceId/labels are only exposed after permission, so we
+    // show it when there are already ≥2 real cameras (a returning user).
+    // Otherwise the live switcher in the status bar handles selection post-grant.
+    let cameraSelect: HTMLSelectElement | null = null;
+    if (probe.supported && cameras.length >= 2 && cameras.some(c => c.deviceId)) {
+      const label = document.createElement("label");
+      label.style.display = "block";
+      label.style.margin = "0.75rem 0 0";
+      label.style.fontSize = "0.85rem";
+      label.textContent = "Camera: ";
+      const select = document.createElement("select");
+      select.style.marginLeft = "0.4rem";
+      cameras.forEach((cam, i) => {
+        const opt = document.createElement("option");
+        opt.value = cam.deviceId;
+        opt.textContent = cam.label || `Camera ${i + 1}`;
+        select.appendChild(opt);
+      });
+      label.appendChild(select);
+      modal.appendChild(label);
+      cameraSelect = select;
+    }
+
     const actions = document.createElement("div");
     actions.className = "modal-actions";
 
@@ -83,7 +123,7 @@ export async function showConsentDialog(): Promise<Mode> {
     allowBtn.disabled = !probe.supported || probe.state === "denied";
     allowBtn.onclick = () => {
       document.body.removeChild(backdrop);
-      resolve("camera");
+      resolve({ mode: "camera", deviceId: cameraSelect?.value || undefined });
     };
 
     const skipBtn = document.createElement("button");
@@ -91,7 +131,7 @@ export async function showConsentDialog(): Promise<Mode> {
     skipBtn.textContent = "Continue without camera";
     skipBtn.onclick = () => {
       document.body.removeChild(backdrop);
-      resolve("behavioral_only");
+      resolve({ mode: "behavioral_only" });
     };
 
     actions.appendChild(allowBtn);

@@ -10,15 +10,20 @@ import { BehavioralSignals } from "./BehavioralSignals";
 import { FaceProcessor } from "./FaceProcessor";
 import { eulerFromMatrix, headAlignedScore } from "./HeadPose";
 import { gazeOnScreenScore } from "./GazeHeuristic";
+import { PlaybackGate } from "./PlaybackGate";
 import { ScoreFusion } from "./ScoreFusion";
-import type { EngagementEvent, FeatureVector, Mode } from "./types";
+import type { EngagementEvent, FeatureVector, GateReason, Mode } from "./types";
 
 export interface MonitorOptions {
   mode: Mode;
   emitIntervalMs?: number;
+  /** Preferred camera; falls back to the browser default when unset. */
+  deviceId?: string;
   onEvent: (ev: EngagementEvent) => void;
   /** Optional debug stream — fires once per detection (~30 Hz). */
   onDebug?: (f: FeatureVector, mode: Mode, score: number) => void;
+  /** Fires when playback should pause/resume; `reason` is null while playing. */
+  onGateChange?: (playing: boolean, reason: GateReason | null) => void;
 }
 
 export class EngagementMonitor {
@@ -39,25 +44,28 @@ export class EngagementMonitor {
   private mode: Mode;
   private video: HTMLVideoElement | null = null;
   private stream: MediaStream | null = null;
+  private readonly gate = new PlaybackGate();
+  /** True when the camera track is muted/ended (lid closed, shutter). */
+  private cameraOff = false;
+  private deviceId?: string;
 
   constructor(private readonly opts: MonitorOptions) {
     this.mode = opts.mode;
+    this.deviceId = opts.deviceId;
   }
 
   async start(): Promise<void> {
     if (this.mode === "camera") {
       // Acquire camera stream and the FaceLandmarker model in parallel.
       const [stream] = await Promise.all([
-        navigator.mediaDevices.getUserMedia({
-          video: { width: 320, height: 240, frameRate: 30 },
-          audio: false,
-        }),
+        navigator.mediaDevices.getUserMedia(this.mediaConstraints()),
         (async () => {
           this.face = new FaceProcessor();
           await this.face.init();
         })(),
       ]);
       this.stream = stream;
+      this.attachTrackListeners();
       const video = document.createElement("video");
       video.srcObject = stream;
       video.muted = true;
@@ -92,7 +100,43 @@ export class EngagementMonitor {
     this.stop();
     this.mode = mode;
     this.fusion.reset();
+    this.gate.reset();
+    this.cameraOff = false;
     await this.start();
+  }
+
+  /** Hot-swap the webcam without tearing down the pipeline (live picker, §8). */
+  async setCamera(deviceId: string): Promise<void> {
+    this.deviceId = deviceId;
+    if (this.mode !== "camera") return;
+    this.stream?.getTracks().forEach(t => t.stop());
+    const stream = await navigator.mediaDevices.getUserMedia(this.mediaConstraints());
+    this.stream = stream;
+    if (this.video) {
+      this.video.srcObject = stream;
+      await this.video.play().catch(() => {});
+    }
+    this.attachTrackListeners();
+  }
+
+  private mediaConstraints(): MediaStreamConstraints {
+    const video: MediaTrackConstraints = { width: 320, height: 240, frameRate: 30 };
+    if (this.deviceId) video.deviceId = { exact: this.deviceId };
+    return { video, audio: false };
+  }
+
+  private attachTrackListeners(): void {
+    const track = this.stream?.getVideoTracks()[0];
+    if (!track) return;
+    this.cameraOff = track.muted;
+    track.addEventListener("mute", () => { this.cameraOff = true; });
+    track.addEventListener("unmute", () => { this.cameraOff = false; });
+    track.addEventListener("ended", () => { this.cameraOff = true; });
+  }
+
+  private evaluateGate(now: number): void {
+    const res = this.gate.update(now, this.latestFeatures, this.latestScore, this.mode, this.cameraOff);
+    if (res.changed) this.opts.onGateChange?.(res.playing, res.reason);
   }
 
   private tick = (): void => {
@@ -123,6 +167,7 @@ export class EngagementMonitor {
     };
     this.latestScore = this.fusion.update(this.latestFeatures, this.mode);
 
+    this.evaluateGate(ts);
     this.opts.onDebug?.(this.latestFeatures, this.mode, this.latestScore);
     this.rafId = requestAnimationFrame(this.tick);
   };
@@ -139,6 +184,7 @@ export class EngagementMonitor {
         ...beh,
       };
       this.latestScore = this.fusion.update(this.latestFeatures, this.mode);
+      this.evaluateGate(performance.now());
       this.opts.onDebug?.(this.latestFeatures, this.mode, this.latestScore);
     }
 
