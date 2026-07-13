@@ -80,8 +80,12 @@ ARG VIDEO_SOURCE_URL=https://download.blender.org/demo/movies/BBB/bbb_sunflower_
 RUN mkdir -p media /tmp/vid \
     && curl -fL --retry 3 -o /tmp/vid/src.zip "$VIDEO_SOURCE_URL" \
     && unzip -o -j /tmp/vid/src.zip '*.mp4' -d /tmp/vid \
-    && ffmpeg -y -i /tmp/vid/*.mp4 -c copy \
-         -movflags frag_keyframe+empty_moov+default_base_moof \
+    && ffmpeg -y \
+         -i /tmp/vid/*.mp4 \
+         -map 0:v:0 \
+         -map 0:a:0 \
+         -c copy \
+         -movflags +frag_keyframe+empty_moov+default_base_moof \
          -f mp4 media/lecture.mp4 \
     && rm -rf /tmp/vid
 
