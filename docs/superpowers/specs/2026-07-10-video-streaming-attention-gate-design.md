@@ -355,4 +355,5 @@ right text. The overlay auto-clears on resume. (This also gives the currently-de
 - `frontend/src/ui/ConsentDialog.ts` — camera picker; return type → `{ mode, deviceId? }` ✅ done
 - `frontend/src/ui/StatusIndicator.ts` — camera picker + playback state ✅ done
 - `frontend/src/main.ts` — wire streaming + gate + picker; drop external URL ✅ done
-- `README.md`, `MATH.md` — documentation (§10) (pending)
+- `README.md` — intro, Attention-Gated Video section, architecture diagram, repo layout, API surface, video-setup notes ✅ done
+- `MATH.md` — §7.4 playback-gate derivation ✅ done

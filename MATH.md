@@ -258,6 +258,48 @@ longest_drop   =  max contiguous run of Ẽ_t < 0.3, in seconds
 
 `longest_drop` is the single most actionable instructor metric — a 90-second drop usually indicates the student left or fell asleep, while a chain of 5-second drops indicates normal note-taking.
 
+### 7.4 Playback gate (attention-gated video)
+
+The same signals that produce `Ẽ_t` also decide whether the lecture video plays. The gate is a
+two-state machine (`playing` / `paused`) with **hysteresis** (different enter/exit thresholds) and
+a **time debounce**, so a momentary glance does not flip playback.
+
+Define the instantaneous "not attentive" predicate. With the camera on:
+
+```
+lookAway   =  (face_present < θ_face)  ∨  (gaze_on_screen < θ_gaze)
+scoreDrop  =  (Ẽ_t < θ_E)
+cameraOff  =  camera track muted or ended        // lid closed / privacy shutter
+notAttentive  =  cameraOff  ∨  lookAway  ∨  scoreDrop
+```
+
+In behavioral-only mode (no camera) the visual terms are replaced by the tab/focus proxy:
+
+```
+notAttentive  =  (v_t < 1)  ∨  (w_t < 1)  ∨  (Ẽ_t < θ_E)     // tab hidden or window blurred
+```
+
+**Hysteresis.** The gaze/score thresholds are stricter to *resume* than to *pause*, so the state
+must clearly change before it flips:
+
+| Threshold | Pause (while playing) | Resume (while paused) |
+|---|---|---|
+| gaze `θ_gaze` | `< 0.35` | `> 0.50` |
+| score `θ_E`   | `< 0.40` | `> 0.50` |
+
+with `θ_face = 0.5`.
+
+**Debounce.** A desired flip must persist before it commits: `PAUSE_DEBOUNCE = 1.5 s`,
+`RESUME_DEBOUNCE = 0.5 s`. Formally, with `d(τ)` the desired state at time `τ`, the gate flips to
+state `s` at `t` only if `d(τ) = s` for all `τ ∈ [t − DEBOUNCE_s, t]`. Pausing is deliberately
+slower than resuming so brief look-aways are ignored but the student is not kept waiting.
+
+**Enforcement.** On a pause the browser stops requesting bytes and sends `{type:"pause"}`; the
+server withholds fragments (§ backend `stream.py`), so an inattentive student is starved of video
+*server-side*, not merely paused locally. The gate also emits a **reason**
+`∈ {camera_off, no_face, low_score, hidden}` (priority order as written above) so the UI can explain
+the pause instead of showing an ambiguous buffering spinner.
+
 ---
 
 ## 8. End-to-End Worked Example

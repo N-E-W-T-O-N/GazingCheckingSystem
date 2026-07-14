@@ -15,6 +15,8 @@ A privacy-respecting engagement detection layer for a video lecturing system.
 
 The camera-side perception runs entirely in the browser using MediaPipe Tasks Vision. Only small numeric feature vectors leave the user's machine. The backend ingests those vectors, persists them in SQLite, and serves a live instructor dashboard plus per-session reports.
 
+The lecture video itself is **streamed from the backend** over a WebSocket (Media Source Extensions) and **gated on attention** — it pauses when the student looks away, the camera is covered, or the tab is hidden, and resumes when they return. See **Attention-Gated Video** below.
+
 > **Read `MATH.md`** for full derivations of every signal computed by this system, plus a numbered inventory of every assumption it makes.
 
 ---
@@ -39,9 +41,21 @@ The brief says: *camera is needed but may not be provided — need to tell befor
 2. **Consent dialog** explains exactly what is computed locally vs. what is sent. The user picks one of:
    - **Allow camera** → full visual-attention pipeline.
    - **Behavioral-only mode** → tab/focus/activity signals only, no video access requested.
-3. **Status indicator** is always visible while a lecture is in progress, showing camera state and last engagement score. The indicator has a one-click pause.
+3. **Status indicator** is always visible while a lecture is in progress, showing camera state, playback state (▶ / ⏸), and the last engagement score. When more than one webcam is present it also shows a **camera picker** to switch cameras live; the choice is remembered in `localStorage`.
 
 If the user previously denied permission, the system refuses to silently retry and instead surfaces a clear "camera was blocked at the OS or browser level — here's how to re-enable" panel.
+
+---
+
+## Attention-Gated Video
+
+The lecture video does not simply play — it plays **only while the student is engaged**.
+
+- **Streamed from the backend.** `VideoStreamClient.ts` feeds a `MediaSource` from binary chunks pushed over `WS /stream/{lecture_id}`. The backend pump sends a chunk only when the client has granted a "pull" credit (buffer backpressure) **and** the engagement gate is open — so an inattentive student's player is *server-side* starved of bytes, not just paused locally.
+- **The gate** (`PlaybackGate.ts`, `MATH.md §7.4`) pauses on **look-away OR score-drop**: no face / gaze off-screen, the fused score `E` falling below threshold, the camera being turned off (lid/shutter), or — in behavioral-only mode — the tab being hidden. Hysteresis + a short debounce stop a momentary glance from flickering playback.
+- **No mystery spinner.** On pause the client freezes the `<video>` on its last frame (suppressing the browser's native buffering spinner, which reads as network lag) and shows a `PauseOverlay` stating *why* it paused and how to resume.
+
+**v1 scope limits** (consequences of the server-gated WebSocket + MSE design): playback is linear — **no seeking** beyond the buffer — and a dropped socket restarts the stream rather than resuming mid-file.
 
 ---
 
@@ -49,25 +63,30 @@ If the user previously denied permission, the system refuses to silently retry a
 
 ```
 ┌────────────────────────────── Browser ──────────────────────────────┐
-│                                                                     │
-│   Webcam ──► MediaPipe FaceLandmarker (WebGL/WebGPU)                │
-│                       │                                             │
-│                       ▼                                             │
-│   Page Visibility  ─► FeatureEmitter (1 Hz)                         │
-│   Window Focus     ──┘    │                                         │
-│   Mouse/Keyboard   ───────┤                                         │
-│                           ▼                                         │
-│                     ScoreFusion ──► smoothed E_t                    │
-│                           │                                         │
-│                           ▼                                         │
-│                     EventSender (POST /ingest, batched)             │
-└─────────────────────────────────┬───────────────────────────────────┘
-                                  │ JSON over HTTPS
-                                  ▼
+│   Webcam ──► MediaPipe FaceLandmarker ─┐                            │
+│   Page Visibility / Focus / Input ─────┤                            │
+│                                        ▼                            │
+│                                  ScoreFusion ──► smoothed E_t        │
+│                                        │                            │
+│                    ┌───────────────────┴───────────────┐            │
+│                    ▼                                   ▼            │
+│              PlaybackGate                        EventSender         │
+│         (look-away OR score-drop)              (POST /ingest)        │
+│                    │ pause/resume + reason                          │
+│                    ▼                                                │
+│        VideoStreamClient (MSE) ── pull/pause ──►  WS /stream         │
+│        <video> ◄── binary fMP4 chunks ────────────┘                 │
+│        PauseOverlay (frozen frame + why)                            │
+└──────────────┬───────────────────────────────────┬──────────────────┘
+               │ JSON over HTTPS                    │ WebSocket
+               ▼                                    ▼
 ┌────────────────────────────── Backend (FastAPI) ────────────────────┐
-│   POST /ingest          ──► SQLite (SQLAlchemy)                     │
+│   POST /ingest            ──► SQLite (SQLAlchemy)                    │
 │   GET  /sessions/{id}/report                                        │
 │   WS   /live/{lecture_id} ──► instructor dashboard                  │
+│   GET  /stream/{id}/info  ──► { mimeCodec, size }                   │
+│   WS   /stream/{id}       ──► gated fMP4 pump (video.py provisions   │
+│                               the file: download + ffmpeg fragment)  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -80,8 +99,10 @@ GazingEngageMent/
 ├── README.md
 ├── MATH.md
 ├── Makefile
+├── Dockerfile               ← Hugging Face Spaces image (build-time video bake)
 ├── .gitignore
 ├── .dockerignore
+├── docs/superpowers/specs/  ← design specs
 ├── .devcontainer/
 │   ├── devcontainer.json
 │   ├── docker-compose.yml
@@ -89,14 +110,17 @@ GazingEngageMent/
 ├── backend/
 │   ├── requirements.txt
 │   ├── run.sh
-│   └── app/
-│       ├── main.py          ← FastAPI app, CORS, routes
-│       ├── db.py            ← SQLAlchemy engine + session
-│       ├── models.py        ← Session, EngagementEvent ORM
-│       ├── schemas.py       ← Pydantic request/response models
-│       ├── ingest.py        ← POST /ingest + WS /live broadcaster
-│       ├── reports.py       ← GET /sessions/{id}/report
-│       └── config.py
+│   ├── app/
+│   │   ├── main.py          ← FastAPI app, CORS, routes, startup provisioning
+│   │   ├── db.py            ← SQLAlchemy engine + session
+│   │   ├── models.py        ← Session, EngagementEvent ORM
+│   │   ├── schemas.py       ← Pydantic request/response models
+│   │   ├── ingest.py        ← POST /ingest + WS /live broadcaster
+│   │   ├── reports.py       ← GET /sessions/{id}/report
+│   │   ├── stream.py        ← GET /stream/{id}/info + gated WS /stream/{id}
+│   │   ├── video.py         ← download + ffmpeg-fragment the lecture video
+│   │   └── config.py
+│   └── tests/               ← video provisioning + stream pump tests
 └── frontend/
     ├── index.html           ← demo SPA: video player + monitor
     ├── package.json
@@ -111,18 +135,23 @@ GazingEngageMent/
         │   ├── GazeHeuristic.ts        ← iris offset + head pose
         │   ├── BehavioralSignals.ts    ← visibility, focus, input
         │   ├── ScoreFusion.ts          ← weighted-logistic + EMA
-        │   └── EngagementMonitor.ts    ← orchestrator
+        │   ├── PlaybackGate.ts         ← pause/resume decision (hysteresis)
+        │   └── EngagementMonitor.ts    ← orchestrator + gate + camera swap
         ├── ui/
-        │   ├── ConsentDialog.ts
-        │   ├── StatusIndicator.ts
+        │   ├── ConsentDialog.ts        ← consent + camera picker
+        │   ├── StatusIndicator.ts      ← mode / playback / live camera picker
+        │   ├── PauseOverlay.ts         ← reason-specific paused overlay
         │   └── DebugOverlay.ts
         └── transport/
-            └── EventSender.ts
+            ├── EventSender.ts
+            └── VideoStreamClient.ts    ← MSE + WS video streaming
 ```
 
 ---
 
 ## Running It
+
+> **Lecture video.** On first run the backend fetches a sample lecture (Blender's *Big Buck Bunny*, 1080p60, ~355 MB) from `VIDEO_SOURCE_URL` and fragments it to fMP4 with `ffmpeg`, caching it under `backend/media/` (git-ignored, never committed). The Docker image bakes this in at build time; native runs download it in the background on startup, so the app is usable immediately and the video becomes available once ready. `ffmpeg` comes from the `imageio-ffmpeg` pip dependency for native runs (no system install needed) and via `apt` in the image. Point `VIDEO_SOURCE_URL` at any H.264 MP4 (or a `.zip` of one) to change the video.
 
 ### Option A — Devcontainer (recommended)
 
@@ -139,7 +168,7 @@ make container-shell     # bash into it
 make dev                 # backend (:8000) + frontend (:5173) together
 ```
 
-Open http://localhost:5173. Grant camera permission when the consent dialog appears, or click "Continue without camera" for behavioral-only mode. The page contains a placeholder lecture video, the engagement status indicator, and a debug overlay showing live per-signal values so you can visually verify the math from `MATH.md §8`.
+Open http://localhost:5173. Grant camera permission when the consent dialog appears, or click "Continue without camera" for behavioral-only mode. The page contains the backend-streamed lecture video (which pauses when you look away), the engagement status indicator, and a debug overlay showing live per-signal values so you can visually verify the math from `MATH.md §8`.
 
 To wipe the dependency volumes and start fresh:
 
@@ -180,9 +209,9 @@ git push space main
 
 What the build does:
 
-1. Stage 1 (`node:20`) runs `npm ci && npm run build`, producing `frontend/dist/`.
-2. Stage 2 (`python:3.12-slim`) installs `backend/requirements.txt`, copies the backend source and the built SPA, and starts uvicorn on port 7860.
-3. FastAPI mounts the SPA at `/` (only when `STATIC_DIR` exists), so the API at `/ingest`, `/sessions/...`, and `/live/{lecture_id}` share the origin with the frontend. CORS, mixed-content, and getUserMedia issues disappear because HF serves the Space over HTTPS.
+1. Stage 1 (`node`) runs `npm ci && npm run build`, producing `frontend/dist/`.
+2. Stage 2 (`python:3.12-slim`) installs `ffmpeg`/`curl`/`unzip` + `backend/requirements.txt`, copies the backend source and the built SPA, **downloads and fragments the lecture video** (`RUN curl … | ffmpeg`) so the image ships ready to stream, and starts uvicorn on port 7860.
+3. FastAPI mounts the SPA at `/` (only when `STATIC_DIR` exists), so the API at `/ingest`, `/sessions/...`, `/live/{lecture_id}`, and `/stream/{lecture_id}` share the origin with the frontend. CORS, mixed-content, and getUserMedia issues disappear because HF serves the Space over HTTPS, and the video WebSocket works because the container is a real long-running process.
 
 **Storage policy.** SQLite lives inside the container's writable layer. It resets whenever the Space rebuilds or restarts — that is intentional. If you ever need durability, either enable HF Persistent Storage and point `DB_PATH` at `/data/engagement.db`, or swap the SQLAlchemy URL to a hosted DB (Turso / Neon).
 
@@ -251,6 +280,19 @@ Returns aggregate stats for the session — `mean_E`, `percent_attentive`, `perc
 ### `WS /live/{lecture_id}`
 
 Server pushes `{user_id, score, t}` messages to subscribed instructor clients as ingest events arrive.
+
+### `GET /stream/{lecture_id}/info`
+
+Returns `{ "mimeCodec": "...", "size": <bytes> }` — the MSE codec string and byte length the browser needs before opening the stream socket. Blocks until the video has finished provisioning on first run.
+
+### `WS /stream/{lecture_id}`
+
+Streams the lecture video as fragmented-MP4 binary frames, in file order. Bidirectional control:
+
+- **Client → server:** `{"type":"pull","n":N}` (grant N chunk credits — buffer backpressure), `{"type":"pause"}` / `{"type":"resume"}` (the engagement gate).
+- **Server → client:** binary chunks (append to the `SourceBuffer` in order), `{"type":"eof"}`, `{"type":"error","message":...}`.
+
+A chunk is sent only while the gate is open **and** credits remain — this is what withholds video from an inattentive student server-side. Single-process only (in-memory, like `/live`).
 
 ---
 
