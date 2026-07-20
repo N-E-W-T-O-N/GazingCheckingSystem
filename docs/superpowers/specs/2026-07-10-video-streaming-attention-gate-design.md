@@ -148,17 +148,25 @@ provisioned two ways, both landing a stream-ready **fragmented** MP4 at `VIDEO_P
 
 - **Build time (Docker):** the Dockerfile installs `ffmpeg`/`curl`/`unzip`, and a
   `RUN curl` step downloads `VIDEO_SOURCE_URL`, unzips it, and fragments it with
-  `ffmpeg -c copy -movflags frag_keyframe+empty_moov+default_base_moof`. The image ships
-  ready to stream.
+  `ffmpeg -c:v copy -c:a aac -movflags +frag_keyframe+empty_moov+default_base_moof`. The
+  image ships ready to stream.
 - **Runtime (native/local, or a wiped ephemeral host):** `ensure_video()` runs on startup
   as a **non-blocking** background task and does the same when `VIDEO_PATH` is missing —
   download → (unzip if `.zip`) → fragment. Idempotent, lock-guarded, atomic (`.part` →
   rename). A failure is non-fatal: only streaming is affected.
 
+**Audio must be AAC.** Video is stream-copied (lossless H.264), but audio is **always
+transcoded to AAC** (`-c:a aac`). The Blender sample ships **MP3** audio, and MP3-in-MP4 is
+not reliably decodable via MSE — a codec mismatch makes the browser's demuxer reject the whole
+stream (`CHUNK_DEMUXER_ERROR_APPEND_FAILED`), so the video never plays even though bytes arrive.
+This was the "no video, everything else works" bug. AAC also matches the `mp4a.40.2` reported by
+`/info`. (Chrome tolerates the H.264 level in the codec string; declaring `avc1.640028` for a
+level-4.2 stream still parses.)
+
 ffmpeg is resolved by `_ffmpeg_bin()`: `FFMPEG_BINARY` env → system `ffmpeg` on PATH
 (Docker's apt install) → the static binary from the `imageio-ffmpeg` pip package (so local
-runs need no system ffmpeg). If `-c copy` can't mux the source audio into MP4, it retries
-re-encoding audio to AAC.
+runs need no system ffmpeg). If `-c:v copy -c:a aac` fails (non-H.264 source), it falls back to
+a full re-encode.
 
 Verified offline in `backend/tests/test_video.py` (stdlib `unittest`, no network): a tiny
 clip served over `file://` drives the real `ensure_video()`, and the output is asserted to

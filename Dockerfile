@@ -84,7 +84,7 @@ RUN mkdir -p media /tmp/vid \
          -i /tmp/vid/*.mp4 \
          -map 0:v:0 \
          -map 0:a:0 \
-         -c copy \
+         -c:v copy -c:a aac \
          -movflags +frag_keyframe+empty_moov+default_base_moof \
          -f mp4 media/lecture.mp4 \
     && rm -rf /tmp/vid

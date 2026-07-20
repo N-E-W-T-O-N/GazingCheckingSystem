@@ -108,16 +108,25 @@ def _run_ffmpeg(ffmpeg: str, src: Path, dest: Path, codec_args: list[str]):
 
 
 def _fragment(src: Path, dest: Path) -> None:
-    """Remux ``src`` into a fragmented MP4 at ``dest`` (atomic via a .part file)."""
+    """Remux ``src`` into an MSE-ready fragmented MP4 at ``dest`` (atomic via .part).
+
+    Video is stream-copied (lossless H.264); **audio is always transcoded to AAC**.
+    The sample assets (Blender's Big Buck Bunny) ship MP3 audio, and MP3-in-MP4 is not
+    reliably decodable via Media Source Extensions — the browser's demuxer rejects the
+    whole stream on a codec mismatch, so the video never plays. AAC is universally
+    MSE-supported and matches the `mp4a.40.2` codec string reported by /info.
+    """
     ffmpeg = _ffmpeg_bin()
     tmp = dest.with_name(dest.name + ".part")
-    log.info("[video] fragmenting %s -> %s", src.name, dest)
-    # Lossless stream copy first; if the source audio isn't MP4-compatible,
-    # retry re-encoding just the audio to AAC.
-    result = _run_ffmpeg(ffmpeg, src, tmp, ["-c", "copy"])
+    log.info("[video] fragmenting %s -> %s (audio -> AAC)", src.name, dest)
+    # Copy the H.264 video, force AAC audio.
+    result = _run_ffmpeg(ffmpeg, src, tmp, ["-c:v", "copy", "-c:a", "aac"])
     if result.returncode != 0:
-        log.warning("[video] stream-copy failed, retrying with AAC audio re-encode")
-        result = _run_ffmpeg(ffmpeg, src, tmp, ["-c:v", "copy", "-c:a", "aac"])
+        # Last resort for a non-H.264 source: full re-encode to H.264 + AAC.
+        log.warning("[video] copy+aac failed, retrying with a full re-encode")
+        result = _run_ffmpeg(
+            ffmpeg, src, tmp, ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+        )
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg fragmentation failed:\n{result.stderr[-2000:]}")
     tmp.replace(dest)

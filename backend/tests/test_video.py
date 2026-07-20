@@ -12,6 +12,7 @@ Run with either:
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,37 @@ def _make_source_clip(dest: Path) -> None:
          "-c:v", "libx264", "-c:a", "aac", "-shortest", str(dest)],
         check=True, capture_output=True,
     )
+
+
+def _make_mp3_source(dest: Path) -> None:
+    """Build a clip with **MP3** audio in an MP4 — the shape that broke MSE."""
+    ffmpeg = video._ffmpeg_bin()
+    subprocess.run(
+        [ffmpeg, "-y",
+         "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-c:v", "libx264", "-c:a", "libmp3lame", "-shortest", str(dest)],
+        check=True, capture_output=True,
+    )
+
+
+def _ffprobe_bin() -> str | None:
+    """Resolve ffprobe (system, or alongside the resolved ffmpeg). None if absent."""
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    ffmpeg = Path(video._ffmpeg_bin())
+    sibling = ffmpeg.with_name("ffprobe" + ffmpeg.suffix)
+    return str(sibling) if sibling.exists() else None
+
+
+def _audio_codec(ffprobe: str, path: Path) -> str:
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    return out.stdout.strip()
 
 
 class EnsureVideoTest(unittest.TestCase):
@@ -74,6 +106,20 @@ class EnsureVideoTest(unittest.TestCase):
 
         self.assertEqual(video.ensure_video(), out)
         self.assertEqual(out.read_bytes(), b"x" * 16, "existing file was overwritten")
+
+    def test_fragment_transcodes_mp3_audio_to_aac(self) -> None:
+        # Regression: a source with MP3 audio (like the Blender asset) must come out
+        # as AAC, or MSE rejects the stream and no video plays.
+        ffprobe = _ffprobe_bin()
+        if not ffprobe:
+            self.skipTest("ffprobe not available")
+        src = self.tmp / "mp3src.mp4"
+        _make_mp3_source(src)
+        self.assertEqual(_audio_codec(ffprobe, src), "mp3", "test fixture should have MP3 audio")
+
+        out = self.tmp / "fragmented.mp4"
+        video._fragment(src, out)
+        self.assertEqual(_audio_codec(ffprobe, out), "aac", "audio was not transcoded to AAC")
 
 
 if __name__ == "__main__":
