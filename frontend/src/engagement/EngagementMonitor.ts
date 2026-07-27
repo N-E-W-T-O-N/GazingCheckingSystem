@@ -19,6 +19,12 @@ export interface MonitorOptions {
   emitIntervalMs?: number;
   /** Preferred camera; falls back to the browser default when unset. */
   deviceId?: string;
+  /**
+   * Dev/test: use a looped video file (object URL) as the perception source
+   * instead of the webcam. When set, camera-mode `start()` feeds this to the
+   * detector rather than calling getUserMedia. Wired via `?testcam` in main.ts.
+   */
+  testVideoUrl?: string;
   onEvent: (ev: EngagementEvent) => void;
   /** Optional debug stream — fires once per detection (~30 Hz). */
   onDebug?: (f: FeatureVector, mode: Mode, score: number) => void;
@@ -48,30 +54,45 @@ export class EngagementMonitor {
   /** True when the camera track is muted/ended (lid closed, shutter). */
   private cameraOff = false;
   private deviceId?: string;
+  private testVideoUrl?: string;
 
   constructor(private readonly opts: MonitorOptions) {
     this.mode = opts.mode;
     this.deviceId = opts.deviceId;
+    this.testVideoUrl = opts.testVideoUrl;
   }
 
   async start(): Promise<void> {
     if (this.mode === "camera") {
-      // Acquire camera stream and the FaceLandmarker model in parallel.
-      const [stream] = await Promise.all([
-        navigator.mediaDevices.getUserMedia(this.mediaConstraints()),
-        (async () => {
-          this.face = new FaceProcessor();
-          await this.face.init();
-        })(),
-      ]);
-      this.stream = stream;
-      this.attachTrackListeners();
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-      await video.play();
-      this.video = video;
+      if (this.testVideoUrl) {
+        // Test mode: drive detection from a looped video file, not the webcam.
+        this.face = new FaceProcessor();
+        await this.face.init();
+        const video = document.createElement("video");
+        video.src = this.testVideoUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        this.video = video;
+      } else {
+        // Acquire camera stream and the FaceLandmarker model in parallel.
+        const [stream] = await Promise.all([
+          navigator.mediaDevices.getUserMedia(this.mediaConstraints()),
+          (async () => {
+            this.face = new FaceProcessor();
+            await this.face.init();
+          })(),
+        ]);
+        this.stream = stream;
+        this.attachTrackListeners();
+        const video = document.createElement("video");
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        this.video = video;
+      }
       this.rafId = requestAnimationFrame(this.tick);
     }
 
@@ -88,6 +109,7 @@ export class EngagementMonitor {
     this.face = null;
     this.stream?.getTracks().forEach(t => t.stop());
     this.stream = null;
+    this.video?.pause();
     this.video = null;
   }
 

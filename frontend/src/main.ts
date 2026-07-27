@@ -37,6 +37,34 @@ function getSessionId(): string {
   return id;
 }
 
+/** Dev/test: prompt for a video file to feed the detector in place of the webcam. */
+function pickTestVideo(): Promise<string> {
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    const h = document.createElement("h2");
+    h.textContent = "Test camera mode";
+    const p = document.createElement("p");
+    p.textContent =
+      "Pick a video of a person's face. It loops and drives face / gaze / score " +
+      "in place of the webcam, so you can test detection without a live camera.";
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "video/*";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      document.body.removeChild(backdrop);
+      resolve(URL.createObjectURL(file));
+    };
+    modal.append(h, p, input);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+  });
+}
+
 async function refreshCameraPicker(indicator: StatusIndicator, currentId?: string): Promise<void> {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -50,11 +78,21 @@ async function main(): Promise<void> {
   const indicator = new StatusIndicator();
   const overlay = new DebugOverlay();
 
-  const consent = await showConsentDialog();
+  const params = new URLSearchParams(location.search);
   // `let` because we may downgrade to behavioral-only if getUserMedia rejects.
-  let mode: Mode = consent.mode;
-  let cameraId = consent.deviceId ?? localStorage.getItem(CAMERA_KEY) ?? undefined;
-  if (cameraId) localStorage.setItem(CAMERA_KEY, cameraId);
+  let mode: Mode;
+  let cameraId: string | undefined;
+  let testVideoUrl: string | undefined;
+  if (params.has("testcam")) {
+    // Dev/test: feed a looped video file to the detector instead of the webcam.
+    testVideoUrl = await pickTestVideo();
+    mode = "camera";
+  } else {
+    const consent = await showConsentDialog();
+    mode = consent.mode;
+    cameraId = consent.deviceId ?? localStorage.getItem(CAMERA_KEY) ?? undefined;
+    if (cameraId) localStorage.setItem(CAMERA_KEY, cameraId);
+  }
   indicator.setMode(mode);
 
   // ── Video: stream it from the backend, gated on attention ──────────────
@@ -83,6 +121,7 @@ async function main(): Promise<void> {
   const monitor = new EngagementMonitor({
     mode,
     deviceId: cameraId,
+    testVideoUrl,
     onEvent: ev => {
       sender.enqueue(ev);
       // Read `mode` lazily so a runtime downgrade is reflected in the UI.
@@ -112,8 +151,8 @@ async function main(): Promise<void> {
     await monitor.setMode(mode);
   }
 
-  // ── Live camera picker (only meaningful with a camera + ≥2 devices) ──────
-  if (mode === "camera") {
+  // ── Live camera picker (only meaningful with a real camera + ≥2 devices) ──
+  if (mode === "camera" && !testVideoUrl) {
     indicator.onCameraChange = async deviceId => {
       localStorage.setItem(CAMERA_KEY, deviceId);
       try {
