@@ -71,22 +71,12 @@ EXPOSE 7860
 WORKDIR /home/app/backend
 
 # Bake the lecture video into the image so the container ships ready to stream
-# (no slow first-request download). This mirrors the runtime "download if
-# missing" fallback in app/video.py::ensure_video() used by native runs.
-# Lands at backend/media/lecture.mp4 — the VIDEO_PATH default. Kept as its own
-# layer so it caches across code changes. Override with:
-#   docker build --build-arg VIDEO_SOURCE_URL=... .
+# (no slow first-request download). This runs the SAME provisioner the runtime
+# uses (app/video.py::ensure_video), so Docker and native behave identically:
+# it downloads the source once and encodes every rendition (720p + 1080p) into
+# backend/media/. Kept as its own layer so it caches across code changes.
+# Override the source with: docker build --build-arg VIDEO_SOURCE_URL=... .
 ARG VIDEO_SOURCE_URL=https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_60fps_normal.mp4.zip
-RUN mkdir -p media /tmp/vid \
-    && curl -fL --retry 3 -o /tmp/vid/src.zip "$VIDEO_SOURCE_URL" \
-    && unzip -o -j /tmp/vid/src.zip '*.mp4' -d /tmp/vid \
-    && ffmpeg -y \
-         -i /tmp/vid/*.mp4 \
-         -map 0:v:0 \
-         -map 0:a:0 \
-         -c:v copy -c:a aac \
-         -movflags +frag_keyframe+empty_moov+default_base_moof \
-         -f mp4 media/lecture.mp4 \
-    && rm -rf /tmp/vid
+RUN VIDEO_SOURCE_URL="$VIDEO_SOURCE_URL" python -c "from app.video import ensure_video; ensure_video()"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]

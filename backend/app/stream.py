@@ -39,8 +39,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from .config import STREAM_CHUNK_BYTES, VIDEO_MIME_CODEC
-from .video import ensure_video
+from .config import STREAM_CHUNK_BYTES, VIDEO_DEFAULT_RENDITION
+from .video import ensure_video, rendition_info, resolve_rendition_path
 
 log = logging.getLogger("uvicorn.error")
 
@@ -49,14 +49,14 @@ router = APIRouter()
 
 @router.get("/stream/{lecture_id}/info")
 async def stream_info(lecture_id: str) -> dict:
-    """Return the codec string + byte size the client needs to set up MSE."""
+    """Return available renditions ({id,label,mimeCodec,size}) + the default id."""
     try:
-        # Blocks until the (background) provisioning has produced the file.
-        path = await asyncio.to_thread(ensure_video)
+        # Blocks until the (background) provisioning has produced the files.
+        await asyncio.to_thread(ensure_video)
     except Exception as exc:  # still downloading, or failed
         log.warning("[stream] info requested but video not ready: %s", exc)
         raise HTTPException(status_code=503, detail="video not available yet")
-    return {"mimeCodec": VIDEO_MIME_CODEC, "size": path.stat().st_size}
+    return {"renditions": rendition_info(), "default": VIDEO_DEFAULT_RENDITION}
 
 
 class _PumpState:
@@ -103,14 +103,16 @@ async def _read_control(ws: WebSocket, state: _PumpState) -> None:
 @router.websocket("/stream/{lecture_id}")
 async def stream_video(ws: WebSocket, lecture_id: str) -> None:
     await ws.accept()
+    quality = ws.query_params.get("q", VIDEO_DEFAULT_RENDITION)
 
     try:
-        path = await asyncio.to_thread(ensure_video)
+        await asyncio.to_thread(ensure_video)
     except Exception as exc:
         log.warning("[stream] video unavailable: %s", exc)
         await ws.send_json({"type": "error", "message": "video not available"})
         await ws.close()
         return
+    path = resolve_rendition_path(quality)
 
     state = _PumpState()
     reader = asyncio.create_task(_read_control(ws, state))

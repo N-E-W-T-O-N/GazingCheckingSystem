@@ -12,6 +12,7 @@ export class StatusIndicator {
   private readonly text: HTMLElement;
   private readonly headerMode: HTMLElement;
   private cameraSelect: HTMLSelectElement | null = null;
+  private qualitySelect: HTMLSelectElement | null = null;
 
   private mode: Mode = "camera";
   private score: number | undefined;
@@ -19,6 +20,8 @@ export class StatusIndicator {
 
   /** Wired by main.ts to hot-swap the camera. */
   onCameraChange?: (deviceId: string) => void;
+  /** Wired by main.ts to switch the lecture-video rendition. */
+  onQualityChange?: (id: string) => void;
 
   constructor() {
     this.dot = document.getElementById("status-dot")!;
@@ -63,6 +66,33 @@ export class StatusIndicator {
       select.appendChild(opt);
     });
     if (currentId) select.value = currentId;
+  }
+
+  /** Populate/refresh the lecture-video quality picker; hidden when < 2 options. */
+  setQualities(renditions: { id: string; label: string }[], currentId: string): void {
+    if (renditions.length < 2) {
+      if (this.qualitySelect) this.qualitySelect.style.display = "none";
+      return;
+    }
+    if (!this.qualitySelect) {
+      const select = document.createElement("select");
+      select.title = "Video quality";
+      select.style.fontSize = "0.72rem";
+      select.style.maxWidth = "6rem";
+      select.addEventListener("change", () => this.onQualityChange?.(select.value));
+      document.getElementById("status")?.appendChild(select);
+      this.qualitySelect = select;
+    }
+    const select = this.qualitySelect;
+    select.style.display = "";
+    select.innerHTML = "";
+    renditions.forEach(r => {
+      const opt = document.createElement("option");
+      opt.value = r.id;
+      opt.textContent = r.label;
+      select.appendChild(opt);
+    });
+    select.value = currentId;
   }
 
   private render(): void {

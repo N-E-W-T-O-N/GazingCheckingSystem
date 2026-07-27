@@ -84,7 +84,7 @@ The lecture video does not simply play — it plays **only while the student is 
 │   POST /ingest            ──► SQLite (SQLAlchemy)                    │
 │   GET  /sessions/{id}/report                                        │
 │   WS   /live/{lecture_id} ──► instructor dashboard                  │
-│   GET  /stream/{id}/info  ──► { mimeCodec, size }                   │
+│   GET  /stream/{id}/info  ──► { renditions[], default }            │
 │   WS   /stream/{id}       ──► gated fMP4 pump (video.py provisions   │
 │                               the file: download + ffmpeg fragment)  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -283,11 +283,13 @@ Server pushes `{user_id, score, t}` messages to subscribed instructor clients as
 
 ### `GET /stream/{lecture_id}/info`
 
-Returns `{ "mimeCodec": "...", "size": <bytes> }` — the MSE codec string and byte length the browser needs before opening the stream socket. Blocks until the video has finished provisioning on first run.
+Returns `{ "renditions": [{ "id", "label", "mimeCodec", "size" }], "default": "720p" }` — the available quality renditions and the server default. The client auto-picks one by screen size at load and can switch (see below). Blocks until the video has finished provisioning on first run.
 
 ### `WS /stream/{lecture_id}`
 
 Streams the lecture video as fragmented-MP4 binary frames, in file order. Bidirectional control:
+
+Add `?q=<rendition-id>` (e.g. `?q=1080p`) to select a quality; omitted defaults to 720p. Switching quality reconnects and restarts from the beginning (no seek).
 
 - **Client → server:** `{"type":"pull","n":N}` (grant N chunk credits — buffer backpressure), `{"type":"pause"}` / `{"type":"resume"}` (the engagement gate).
 - **Server → client:** binary chunks (append to the `SourceBuffer` in order), `{"type":"eof"}`, `{"type":"error","message":...}`.

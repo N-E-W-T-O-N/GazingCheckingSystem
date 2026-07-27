@@ -1,10 +1,9 @@
-"""Tests for app.video provisioning.
+"""Tests for app.video provisioning (multi-rendition).
 
-Path-agnostic (locates the backend package relative to THIS file, so it makes
-no assumption about where the repo lives) and offline: a tiny locally generated
-clip stands in for the 355 MB Blender asset and is served to the real
-``ensure_video()`` via a ``file://`` URL, so the actual backend build path
-(download → fragment) runs with no network.
+Path-agnostic (locates backend/ relative to this file) and offline: a tiny
+locally generated clip stands in for the 355 MB Blender asset and is served to
+the real ``ensure_video()`` via a ``file://`` URL, so the actual backend build
+path (download → encode renditions) runs with no network.
 
 Run with either:
     python backend/tests/test_video.py
@@ -26,7 +25,7 @@ from app import video  # noqa: E402
 
 
 def _make_source_clip(dest: Path) -> None:
-    """Build a tiny H.264+AAC clip using the backend's own ffmpeg resolver."""
+    """Build a tiny H.264 + AAC clip using the backend's own ffmpeg resolver."""
     ffmpeg = video._ffmpeg_bin()
     subprocess.run(
         [ffmpeg, "-y",
@@ -68,54 +67,58 @@ def _audio_codec(ffprobe: str, path: Path) -> str:
     return out.stdout.strip()
 
 
-class EnsureVideoTest(unittest.TestCase):
+class ProvisioningTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
-        # Snapshot the module-level config so each test restores it.
-        self._saved = (video.VIDEO_CACHE_DIR, video.VIDEO_PATH, video.VIDEO_SOURCE_URL)
+        self._saved = (video.VIDEO_CACHE_DIR, video.VIDEO_SOURCE_URL)
+        video.VIDEO_CACHE_DIR = self.tmp  # rendition_path() reads this module global
 
     def tearDown(self) -> None:
-        video.VIDEO_CACHE_DIR, video.VIDEO_PATH, video.VIDEO_SOURCE_URL = self._saved
+        video.VIDEO_CACHE_DIR, video.VIDEO_SOURCE_URL = self._saved
         self._tmp.cleanup()
 
-    def test_downloads_and_fragments(self) -> None:
-        # The backend builds the mp4: ensure_video() fetches the source and
-        # fragments it. We only supply a stand-in source and assert the result.
-        source = self.tmp / "source.mp4"
-        _make_source_clip(source)
-
-        out = self.tmp / "lecture.mp4"
-        video.VIDEO_CACHE_DIR = self.tmp
-        video.VIDEO_PATH = out
-        video.VIDEO_SOURCE_URL = source.as_uri()  # file:// — no network
-
-        result = video.ensure_video()
-
-        self.assertEqual(result, out)
-        data = out.read_bytes()
+    def _assert_fragmented(self, path: Path) -> None:
+        self.assertTrue(path.exists() and path.stat().st_size > 0, f"{path.name} missing")
+        data = path.read_bytes()
         self.assertIn(b"ftyp", data[:64], "missing init segment")
         self.assertIn(b"moof", data, "output is not a fragmented MP4 (no moof box)")
 
+    def test_downloads_and_produces_renditions(self) -> None:
+        # The backend builds the video: ensure_video() fetches the source and
+        # encodes every rendition. We only supply a stand-in source.
+        source = self.tmp / "source.mp4"
+        _make_source_clip(source)
+        video.VIDEO_SOURCE_URL = source.as_uri()  # file:// — no network
+
+        default = video.ensure_video()
+
+        for rid in ("720p", "1080p"):
+            self._assert_fragmented(video.rendition_path(rid))
+        self.assertEqual(default, video.rendition_path(video.VIDEO_DEFAULT_RENDITION))
+        ids = {r["id"] for r in video.rendition_info()}
+        self.assertEqual(ids, {"720p", "1080p"})
+
     def test_is_idempotent_when_present(self) -> None:
-        out = self.tmp / "lecture.mp4"
-        out.write_bytes(b"x" * 16)  # pretend it is already provisioned
-        video.VIDEO_PATH = out
-        # An unreachable URL: if ensure_video tried to fetch it the test fails.
+        for rid in ("720p", "1080p"):
+            video.rendition_path(rid).write_bytes(b"x" * 16)  # pretend provisioned
+        # Unreachable URL: if ensure_video tried to fetch it the test would fail.
         video.VIDEO_SOURCE_URL = "http://127.0.0.1:0/should-not-be-fetched"
 
-        self.assertEqual(video.ensure_video(), out)
-        self.assertEqual(out.read_bytes(), b"x" * 16, "existing file was overwritten")
+        video.ensure_video()
+
+        self.assertEqual(video.rendition_path("720p").read_bytes(), b"x" * 16,
+                         "existing rendition was overwritten")
 
     def test_fragment_transcodes_mp3_audio_to_aac(self) -> None:
-        # Regression: a source with MP3 audio (like the Blender asset) must come out
-        # as AAC, or MSE rejects the stream and no video plays.
+        # Regression: a source with MP3 audio (like the Blender asset) must come
+        # out as AAC, or MSE rejects the stream and no video plays.
         ffprobe = _ffprobe_bin()
         if not ffprobe:
             self.skipTest("ffprobe not available")
         src = self.tmp / "mp3src.mp4"
         _make_mp3_source(src)
-        self.assertEqual(_audio_codec(ffprobe, src), "mp3", "test fixture should have MP3 audio")
+        self.assertEqual(_audio_codec(ffprobe, src), "mp3", "fixture should have MP3 audio")
 
         out = self.tmp / "fragmented.mp4"
         video._fragment(src, out)

@@ -46,7 +46,9 @@ Consequences of the server-gated WebSocket+MSE choice, documented honestly:
   would give free seeking; the server gate is the reason we don't use it.)
 - **No mid-stream resume after a dropped socket.** On WS close/error the client surfaces an
   error and offers reload; it does not resume from the last byte offset.
-- **No adaptive bitrate / multiple renditions.** Single file, single quality.
+- **No continuous ABR.** There are two pre-encoded renditions (720p + 1080p) with a
+  status-bar picker and a screen-size auto-pick at load; switching mid-playback **restarts**
+  from the start (no seek). Seamless mid-stream rendition switching would need HLS/DASH.
 - **No DRM.** The gate discourages passive idle-watching; it is not anti-piracy.
 - **Fragmentation happens once at runtime, not per-request.** The first run downloads +
   fragments the source and caches the result; subsequent runs reuse the cache. There is no

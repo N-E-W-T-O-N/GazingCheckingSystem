@@ -1,14 +1,15 @@
 """Integration test for the /stream WebSocket pump (app.stream).
 
-Path-agnostic (locates backend/ relative to this file). Drives the real router
-through Starlette's TestClient over a small fragmented clip built by the
-backend's own ``video._fragment`` — so the actual pump code runs, not a stand-in.
+Path-agnostic; drives the real router through Starlette's TestClient over a
+small fragmented clip built by the backend's own code. Both renditions are
+pre-provisioned (same clip) so ensure_video() is a no-op and no network is used.
 
 Requires the test-only deps fastapi + httpx. Run with a Python that has them:
     python backend/tests/test_stream.py
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,21 +42,27 @@ def _make_fragmented(dest: Path) -> None:
 class StreamPumpTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.path = Path(self._tmp.name) / "lecture.mp4"
-        _make_fragmented(self.path)
-        self._saved = (video.VIDEO_PATH, stream.STREAM_CHUNK_BYTES)
-        video.VIDEO_PATH = self.path      # ensure_video() returns this (it exists)
+        self.tmp = Path(self._tmp.name)
+        self._saved = (video.VIDEO_CACHE_DIR, stream.STREAM_CHUNK_BYTES)
+        video.VIDEO_CACHE_DIR = self.tmp
+        # Pre-provision both renditions with the same clip so ensure_video() is
+        # a no-op (all renditions ready) and never hits the network.
+        frag = self.tmp / "frag.mp4"
+        _make_fragmented(frag)
+        for rid in ("720p", "1080p"):
+            shutil.copyfile(frag, video.rendition_path(rid))
+        self.path = video.rendition_path(video.VIDEO_DEFAULT_RENDITION)
         stream.STREAM_CHUNK_BYTES = 8192  # force several chunks from a small file
+
         app = FastAPI()
         app.include_router(stream.router)
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
-        video.VIDEO_PATH, stream.STREAM_CHUNK_BYTES = self._saved
+        video.VIDEO_CACHE_DIR, stream.STREAM_CHUNK_BYTES = self._saved
         self._tmp.cleanup()
 
     def _drain(self, ws) -> bytes:
-        """Collect binary frames until the server sends the eof control frame."""
         received = bytearray()
         while True:
             msg = ws.receive()
@@ -69,8 +76,9 @@ class StreamPumpTest(unittest.TestCase):
         r = self.client.get("/stream/lec-1/info")
         self.assertEqual(r.status_code, 200)
         body = r.json()
-        self.assertEqual(body["size"], self.path.stat().st_size)
-        self.assertIn("codecs", body["mimeCodec"])
+        self.assertEqual({x["id"] for x in body["renditions"]}, {"720p", "1080p"})
+        self.assertEqual(body["default"], video.VIDEO_DEFAULT_RENDITION)
+        self.assertTrue(all("codecs" in x["mimeCodec"] for x in body["renditions"]))
 
     def test_pump_delivers_full_file_in_order(self) -> None:
         expected = self.path.read_bytes()
@@ -80,13 +88,13 @@ class StreamPumpTest(unittest.TestCase):
         self.assertEqual(received, expected)
 
     def test_no_bytes_without_credit(self) -> None:
-        # With zero credit granted the pump must not send anything; then a pull
-        # releases the stream. Proves credit-gating (backpressure).
+        # Gate shut + credit granted -> nothing flows until resume; proves the
+        # engagement gate + credit backpressure.
         expected = self.path.read_bytes()
         with self.client.websocket_connect("/stream/lec-1") as ws:
-            ws.send_json({"type": "pause"})              # gate shut
-            ws.send_json({"type": "pull", "n": 100000})  # credit, but gated
-            ws.send_json({"type": "resume"})             # now it may flow
+            ws.send_json({"type": "pause"})
+            ws.send_json({"type": "pull", "n": 100000})
+            ws.send_json({"type": "resume"})
             received = self._drain(ws)
         self.assertEqual(received, expected)
 

@@ -98,12 +98,17 @@ async function main(): Promise<void> {
   // ── Video: stream it from the backend, gated on attention ──────────────
   const video = document.getElementById("lecture-video") as HTMLVideoElement;
   const pauseOverlay = new PauseOverlay(video);
+  // Auto-pick a starting quality by screen size: small screens don't need 1080p.
+  const preferredQuality = (window.screen?.height ?? 720) < 900 ? "720p" : "1080p";
   const stream = new VideoStreamClient({
     video,
     infoUrl: API_ENDPOINTS.streamInfo(LECTURE_ID),
-    wsUrl: API_ENDPOINTS.stream(LECTURE_ID),
+    wsUrl: q => API_ENDPOINTS.stream(LECTURE_ID, q),
+    preferredQuality,
     onError: msg => pauseOverlay.error(msg),
+    onRenditions: (renditions, current) => indicator.setQualities(renditions, current),
   });
+  indicator.onQualityChange = q => stream.switchQuality(q);
   void stream.start();
 
   // ── Telemetry ──────────────────────────────────────────────────────────

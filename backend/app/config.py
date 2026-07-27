@@ -22,25 +22,25 @@ DISENGAGED_THRESHOLD = 0.3
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 
 # ── Lecture video ────────────────────────────────────────────────────────
-# The video is large and is NOT committed to git. It is provisioned two ways:
-#   * baked into the Docker image at build time (see the Dockerfile `RUN curl`
-#     step), so the container ships ready to stream; and
-#   * downloaded on startup by app.video.ensure_video() when the cached file
-#     is missing (native/local runs, or an ephemeral host that wiped it).
-# Both paths land the playable file at VIDEO_PATH.
+# The video is large and is NOT committed to git. It is provisioned two ways
+# (see app/video.py): baked into the Docker image at build time, and
+# downloaded on startup when the cache is missing (native / wiped ephemeral
+# host). The source is downloaded once and encoded into several **renditions**
+# (see app/video.py::_RENDITIONS), cached as media/lecture-{id}.mp4.
 VIDEO_CACHE_DIR = Path(os.environ.get("VIDEO_CACHE_DIR", BASE_DIR / "media"))
-VIDEO_PATH = Path(os.environ.get("VIDEO_PATH", VIDEO_CACHE_DIR / "lecture.mp4"))
 VIDEO_SOURCE_URL = os.environ.get(
     "VIDEO_SOURCE_URL",
     "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_60fps_normal.mp4.zip",
 )
+# Rendition served when the client does not request a specific quality.
+VIDEO_DEFAULT_RENDITION = os.environ.get("VIDEO_DEFAULT_RENDITION", "720p")
 
 # Streaming (see app/stream.py):
 # Chunk size the WebSocket pump sends per credit.
 STREAM_CHUNK_BYTES = int(os.environ.get("STREAM_CHUNK_BYTES", 128 * 1024))
-# MSE codec string the client uses to build its SourceBuffer, returned by
-# /stream/{id}/info. Default matches the H.264 High + AAC Blender asset; override
-# via env if you point VIDEO_SOURCE_URL at a differently-encoded file.
+# MSE codec string reported by /stream/{id}/info for every rendition. The 720p
+# rendition is encoded as H.264 High@4.0 to match exactly; Chrome tolerates the
+# level for the copied 1080p (High@4.2) stream. Override if you change the ladder.
 VIDEO_MIME_CODEC = os.environ.get(
     "VIDEO_MIME_CODEC", 'video/mp4; codecs="avc1.640028, mp4a.40.2"'
 )
